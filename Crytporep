@@ -1,0 +1,62 @@
+name: Build
+
+# Using a single file workflow is the preferred solution for our CI over workflow_runs.
+# 1. It generates only 1 action item in the list making it more readable
+# 2. It includes the PR/Commit text in the action item
+# 3. Artifacts are not available between workflows.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: set to pull_request number to execute on external pr
+        required: false
+
+jobs:
+  ####### Check files and formatting #######
+
+  set-tags:
+    runs-on: ubuntu-latest
+    outputs:
+      git_branch: ${{ steps.check-git-ref.outputs.git_branch }}
+      git_ref: ${{ steps.check-git-ref.outputs.git_ref }}
+      image_exists: ${{ steps.check-check-docker-image.outputs.image_exists }}
+      sha: ${{ steps.get-sha.outputs.sha }}
+      sha8: ${{ steps.get-sha.outputs.sha8 }}
+      polkadot_repo: ${{ steps.get-sha.outputs.polkadot_repo }}
+      polkadot_commit: ${{ steps.get-sha.outputs.polkadot_commit }}
+    steps:
+      - name: Check git ref
+        id: check-git-ref
+        # if PR
+        # else if manual PR
+        # else (push)
+        run: |
+          if [[ -n "${{ github.event.pull_request.head.sha }}" ]]; then
+            echo ::set-output name=git_branch::$(echo ${GITHUB_HEAD_REF})
+            echo ::set-output name=git_ref::${{ github.event.pull_request.head.sha }}
+          elif [[ -n "${{ github.event.inputs.pull_request }}" ]]; then
+            echo ::set-output name=git_branch::$(echo ${GITHUB_HEAD_REF})
+            echo ::set-output name=git_ref::refs/pull/${{ github.event.inputs.pull_request }}/head
+          else 
+            echo ::set-output name=git_branch::$(echo ${GITHUB_REF#refs/heads/})
+            echo ::set-output name=git_ref::$GITHUB_REF
+          fi
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ steps.check-git-ref.outputs.git_ref }}
+      - name: Get Sha
+        id: get-sha
+        run: |
+          echo ::set-output name=sha::$(git log -1 --format="%H")
+          echo ::set-output name=sha8::$(git log -1 --format="%H" | cut -c1-8)
+          echo ::set-output name=polkadot_repo::$(egrep -o 'https.*/polkadot' Cargo.lock | head -1)
+          echo ::set-output name=polkadot_commit::$(egrep -o '/polkadot.*#([^\"]*)' Cargo.lock | \
+            head -1 | sed 's/.*#//' |  cut -c1-8)
+      - name: Check existing docker image
+        id: check-docker-image
+        run: |
